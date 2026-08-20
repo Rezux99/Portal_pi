@@ -63,7 +63,10 @@ class FeedIngester:
 
     def _get_db(self, db_path: Optional[str] = None):
         if self._use_sb:
-            return SupabaseDatabase()
+            try:
+                return SupabaseDatabase()
+            except Exception:
+                self._use_sb = False  # Fallback a local si Supabase falla
         return PortalDatabase(db_path or str(DB_PATH))
 
     def _load_config(self) -> None:

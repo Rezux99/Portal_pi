@@ -21,10 +21,13 @@ def get_supabase():
     """Cliente con anon key — para auth y operaciones con RLS."""
     global _client
     if _client is None and use_supabase():
+        anon_key = os.environ.get("SUPABASE_KEY")
+        if not anon_key:
+            return None
         from supabase import create_client
         _client = create_client(
             os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_KEY"],
+            anon_key,
         )
     return _client
 
@@ -33,10 +36,13 @@ def get_supabase_admin():
     """Cliente con service_role key — bypassea RLS. Solo para backend."""
     global _admin_client
     if _admin_client is None and use_supabase():
+        service_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        if not service_key:
+            return None
         from supabase import create_client
         _admin_client = create_client(
             os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_KEY"],
+            service_key,
         )
     return _admin_client
 

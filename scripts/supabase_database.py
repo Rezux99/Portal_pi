@@ -21,8 +21,8 @@ class SupabaseDatabase:
     Mismos métodos que PortalDatabase + extras específicos de Supabase.
     """
 
-    def __init__(self) -> None:
-        self._client = get_supabase_admin()
+    def __init__(self, client=None) -> None:
+        self._client = client or get_supabase_admin()
         if self._client is None:
             raise RuntimeError("Supabase no configurado. Set SUPABASE_URL + SUPABASE_SERVICE_KEY.")
 

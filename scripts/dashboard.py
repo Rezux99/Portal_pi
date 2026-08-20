@@ -4,6 +4,7 @@ Dashboard web para Portal Pi — Todo autocontenido, sin StaticFiles.
 """
 
 import json
+import os
 import threading
 import asyncio
 from pathlib import Path
@@ -47,7 +48,19 @@ app = FastAPI(title="Portal Pi", version="1.0.0")
 
 db = PortalDatabase(str(DB_PATH))
 state_mgr = StateManager(str(STATE_PATH))
-ingester = FeedIngester()
+try:
+    ingester = FeedIngester()
+except Exception as _ingester_init_err:
+    # Si FeedIngester falla (ej: Supabase mal configurado), reintentar en modo local
+    import logging
+    logging.getLogger("portal_pi").warning(f"FeedIngester init failed ({_ingester_init_err}), retrying in local mode")
+    # Forzar que use_supabase() retorne False para este intento
+    _saved_url = os.environ.pop("SUPABASE_URL", None)
+    try:
+        ingester = FeedIngester()
+    finally:
+        if _saved_url:
+            os.environ["SUPABASE_URL"] = _saved_url
 scheduler = PipelineScheduler()
 
 
@@ -133,8 +146,30 @@ def _get_supabase_db():
             return None
         from scripts.supabase_database import SupabaseDatabase
         return SupabaseDatabase(admin)
-    except Exception:
+    except Exception as exc:
+        _supabase_error = str(exc)[:200]
         return None
+
+# Último error de Supabase (para diagnóstico)
+_supabase_error: str = ""
+
+
+@app.get("/api/supabase/status")
+async def api_supabase_status():
+    """Diagnóstico: muestra si Supabase está configurado y conectando."""
+    configured = use_supabase()
+    if not configured:
+        return {"configured": False, "reason": "SUPABASE_URL no configurado (env vars faltan)"}
+    try:
+        admin = get_supabase_admin()
+        if admin is None:
+            return {"configured": True, "connected": False, "reason": "get_supabase_admin() returned None — comprueba SUPABASE_SERVICE_KEY"}
+        # Test básico: listar feed_configs
+        result = admin.table("feed_configs").select("id", count="exact").limit(1).execute()
+        count = result.count if hasattr(result, "count") else len(result.data)
+        return {"configured": True, "connected": True, "feed_configs_count": count}
+    except Exception as exc:
+        return {"configured": True, "connected": False, "error": str(exc)[:300]}
 
 
 def _run_ingest_background(feed_name: Optional[str] = None) -> None:
@@ -629,9 +664,20 @@ async def api_feeds():
                      "enabled": f.get("enabled", True), "poll_interval_min": f.get("poll_interval_min", 30)} for f in feeds]
         except Exception:
             pass  # Fall through to local
-    # ── Modo local ──
-    try: return ingester.list_feeds()
-    except: return []
+    # ── Modo local: ingester → config/feeds.json ──
+    try:
+        feeds = ingester.list_feeds()
+        if feeds:
+            return feeds
+    except Exception:
+        pass
+    # Último recurso: leer directamente config/feeds.json
+    try:
+        raw = Path(FEEDS_CONFIG_PATH).read_text(encoding="utf-8")
+        config = json.loads(raw)
+        return config.get("feeds", [])
+    except Exception:
+        return []
 
 
 @app.post("/api/feeds/add")
