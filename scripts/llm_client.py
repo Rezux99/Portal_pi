@@ -100,6 +100,7 @@ class LLMClient:
         self._call_log: List[Dict[str, Any]] = []  # Últimas llamadas
         self._router: Optional[SmartRouter] = None  # Router inteligente (se inicializa en _load_config)
         self._synergy: Optional[SynergyRouter] = None  # Router sinérgico (se inicializa en _load_config)
+        self._user_credentials: Dict[str, str] = {}  # Keys inyectadas desde Supabase (por request)
         self._load_config()
 
     def _load_config(self) -> None:
@@ -264,8 +265,17 @@ class LLMClient:
             }, f, indent=2, ensure_ascii=False)
 
     def get_credential(self, provider_name: str) -> str:
+        # Prioridad: keys inyectadas desde Supabase > archivo local cifrado
+        if provider_name in self._user_credentials:
+            return self._user_credentials[provider_name]
         creds = self._load_credentials()
         return creds.get(provider_name, "")
+
+    def set_user_credentials(self, user_creds: Dict[str, str]) -> None:
+        """Inyecta credenciales de usuario desde Supabase. Prioridad sobre el archivo local."""
+        self._user_credentials = user_creds
+        # Re-registrar targets del router con las nuevas keys
+        self._init_router()
 
     def set_credential(self, provider_name: str, api_key: str) -> None:
         creds = self._load_credentials()

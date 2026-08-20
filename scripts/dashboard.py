@@ -38,6 +38,7 @@ from scripts.paths import (
 
 from scripts.web_search import needs_web_search, extract_search_query, web_search
 from scripts.synergy_router import is_non_empty, always_valid
+from scripts.supabase_client import use_supabase, get_supabase_admin
 
 
 # ─── APP ────────────────────────────────────────────────────────────────────
@@ -68,6 +69,24 @@ def _get_llm() -> LLMClient:
     return _llm_client
 
 
+def _get_llm_for_user(request: Request) -> LLMClient:
+    """Retorna un LLMClient con credenciales del usuario (Supabase) o el singleton local."""
+    user_id = _get_user_id_from_request(request)
+    supa_db = _get_supabase_db()
+    if user_id and supa_db:
+        # Crear instancia fresh por request para no contaminar el singleton
+        try:
+            llm = LLMClient()
+            user_creds = supa_db.list_user_credentials(user_id)
+            cred_map = {c["provider"]: c["api_key"] for c in user_creds}
+            if cred_map:
+                llm.set_user_credentials(cred_map)
+            return llm
+        except LLMClientError:
+            pass
+    return _get_llm()
+
+
 # ─── HELPERS ────────────────────────────────────────────────────────────────
 
 def _read_last_log(log_path: Path, max_lines: int = 50) -> List[str]:
@@ -75,6 +94,39 @@ def _read_last_log(log_path: Path, max_lines: int = 50) -> List[str]:
         return []
     with open(log_path, "r", encoding="utf-8") as f:
         return f.readlines()[-max_lines:]
+
+
+def _get_user_id_from_request(request: Request) -> Optional[str]:
+    """Extrae el user_id de Supabase del header Authorization.
+    Retorna None si no hay auth o está en modo local."""
+    if not use_supabase():
+        return None
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    try:
+        admin = get_supabase_admin()
+        if admin is None:
+            return None
+        resp = admin.auth.get_user(token)
+        return resp.user.id if resp and resp.user else None
+    except Exception:
+        return None
+
+
+def _get_supabase_db():
+    """Retorna el cliente admin de Supabase para operaciones de credenciales."""
+    if not use_supabase():
+        return None
+    try:
+        admin = get_supabase_admin()
+        if admin is None:
+            return None
+        from scripts.supabase_database import SupabaseDatabase
+        return SupabaseDatabase(admin)
+    except Exception:
+        return None
 
 
 def _run_ingest_background(feed_name: Optional[str] = None) -> None:
@@ -553,10 +605,25 @@ async def api_llm_log(lines: int = Query(50, ge=1, le=500)):
 # ─── LLM ENDPOINTS ───────────────────────────────────────────────────────
 
 @app.get("/api/llm/config")
-async def api_llm_config():
+async def api_llm_config(request: Request):
     try:
         llm = _get_llm()
-        return {"status": "ok", "config": llm.get_config_info()}
+        config_info = llm.get_config_info()
+
+        # Si hay usuario autenticado, mergear keys de Supabase
+        user_id = _get_user_id_from_request(request)
+        supa_db = _get_supabase_db()
+        if user_id and supa_db:
+            user_creds = supa_db.list_user_credentials(user_id)
+            user_cred_map = {c["provider"]: c["api_key"] for c in user_creds}
+            for name, info in config_info.get("providers", {}).items():
+                if name in user_cred_map:
+                    key = user_cred_map[name]
+                    masked = key[:6] + "..." + key[-4:] if len(key) > 12 else "✓"
+                    info["api_key_status"] = masked
+                    info["has_key"] = True
+
+        return {"status": "ok", "config": config_info}
     except LLMClientError as e:
         return {"status": "error", "message": str(e)}
     except Exception as e:
@@ -564,9 +631,9 @@ async def api_llm_config():
 
 
 @app.post("/api/llm/test")
-async def api_llm_test():
+async def api_llm_test(request: Request):
     try:
-        llm = _get_llm()
+        llm = _get_llm_for_user(request)
         results = llm.test_all()
         return {"status": "ok", "providers": [r.to_dict() for r in results]}
     except LLMClientError as e:
@@ -591,24 +658,33 @@ async def api_llm_router_status():
 
 @app.post("/api/llm/credentials")
 async def api_llm_set_credential(request: Request):
-    """Guarda una API key de forma segura en .credentials.json."""
+    """Guarda una API key. En modo Supabase, en user_credentials; si no, en .credentials.json."""
     try:
         body = await request.json()
     except:
         return {"status": "error", "message": "JSON inválido"}
-    
+
     provider = body.get("provider", "")
     api_key = body.get("api_key", "")
-    
+
     if not provider:
         return {"status": "error", "message": "provider es requerido"}
     if not api_key:
         return {"status": "error", "message": "api_key es requerido"}
-    
+
     try:
         llm = _get_llm()
         if provider not in llm.providers:
             return {"status": "error", "message": f"Proveedor '{provider}' no encontrado. Disponibles: {list(llm.providers.keys())}"}
+
+        # Supabase: guardar en user_credentials (persistente)
+        user_id = _get_user_id_from_request(request)
+        supa_db = _get_supabase_db()
+        if user_id and supa_db:
+            supa_db.set_user_credential(user_id, provider, api_key)
+            return {"status": "ok", "message": f"API key para '{provider}' guardada (Supabase)"}
+
+        # Local: guardar en .credentials.json
         llm.set_credential(provider, api_key)
         return {"status": "ok", "message": f"API key para '{provider}' guardada"}
     except LLMClientError as e:
@@ -618,9 +694,15 @@ async def api_llm_set_credential(request: Request):
 
 
 @app.delete("/api/llm/credentials/{provider}")
-async def api_llm_delete_credential(provider: str):
-    """Elimina una API key."""
+async def api_llm_delete_credential(provider: str, request: Request):
+    """Elimina una API key. En modo Supabase, de user_credentials; si no, de .credentials.json."""
     try:
+        user_id = _get_user_id_from_request(request)
+        supa_db = _get_supabase_db()
+        if user_id and supa_db:
+            supa_db.delete_user_credential(user_id, provider)
+            return {"status": "ok", "message": f"API key para '{provider}' eliminada (Supabase)"}
+
         llm = _get_llm()
         llm.set_credential(provider, "")
         return {"status": "ok", "message": f"API key para '{provider}' eliminada"}
@@ -1756,7 +1838,7 @@ async def api_chat(request: Request):
     )
     
     try:
-        llm = _get_llm()
+        llm = _get_llm_for_user(request)
         # Usar sinergia si está disponible (validación + failover automático)
         use_synergy = body.get("mode", "auto") == "auto" or provider == "auto"
         if use_synergy and llm._synergy:
