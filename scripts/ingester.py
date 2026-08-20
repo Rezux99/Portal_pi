@@ -71,6 +71,10 @@ class FeedIngester:
         if self._use_sb:
             try:
                 feeds = self.db.list_feed_configs()
+                # Auto-seed: si la tabla está vacía, importar desde config/feeds.json
+                if not feeds:
+                    self._seed_feeds_from_json()
+                    feeds = self.db.list_feed_configs()
                 settings = {}
                 state = self.db.get_state("ingester_settings")
                 if state:
@@ -84,6 +88,28 @@ class FeedIngester:
         if not self.config:
             self.config = {"feeds": [], "settings": {}}
             self._save_config()
+
+    def _seed_feeds_from_json(self) -> None:
+        """Si la tabla feed_configs de Supabase está vacía, la puebla desde config/feeds.json."""
+        try:
+            local_config = load_json_config(self.config_path, default={"feeds": []})
+            local_feeds = local_config.get("feeds", [])
+            if not local_feeds:
+                return
+            self._log(f"Auto-seeding {len(local_feeds)} feeds from config/feeds.json → Supabase feed_configs")
+            for f in local_feeds:
+                try:
+                    self.db.upsert_feed_config(
+                        name=f.get("name", ""),
+                        url=f.get("url", ""),
+                        category=f.get("category", "Otro"),
+                        enabled=f.get("enabled", True),
+                        poll_interval_min=f.get("poll_interval_min", 30),
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _save_config(self) -> None:
         """Persiste la configuración de feeds."""
