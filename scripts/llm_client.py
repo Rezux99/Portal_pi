@@ -1,7 +1,7 @@
 """
 llm_client.py
 Cliente LLM multi-provider para Portal Pi.
-API keys en config/.credentials.json (separado del config, nunca se comparte).
+API keys en config/.credentials.json (cifrado con Fernet, nunca se comparte).
 
 Usa SmartRouter para:
 - Puntuar proveedores por peso × latencia × tasa de éxito × disponibilidad
@@ -13,6 +13,7 @@ Usa SmartRouter para:
 
 import json
 import asyncio
+import base64
 from pathlib import Path
 from typing import Callable, Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime, timezone
@@ -33,9 +34,36 @@ from scripts.synergy_router import (
 )
 
 
-from scripts.paths import BASE_DIR, LLM_CONFIG_PATH, CREDENTIALS_PATH, LOGS_DIR, LLM_LOG, log_to_file
+from scripts.paths import BASE_DIR, LLM_CONFIG_PATH, CREDENTIALS_PATH, CRED_KEY_PATH, LOGS_DIR, LLM_LOG, log_to_file
 
 CONFIG_PATH = LLM_CONFIG_PATH
+
+
+# ─── Cifrado de credenciales con Fernet ────────────────────────────────
+# La clave Fernet se autogenera en config/.cred_key la primera vez.
+# Si no existe cryptography, las credenciales se guardan en texto plano
+# (mantiene compatibilidad con instalaciones mínimas).
+
+def _get_fernet():
+    """Retorna una instancia Fernet para cifrar/descifrar credenciales."""
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        return None
+    key_path = CRED_KEY_PATH
+    if not key_path.exists():
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key = Fernet.generate_key()
+        key_path.write_bytes(key)
+    else:
+        key = key_path.read_bytes()
+    try:
+        return Fernet(key)
+    except Exception:
+        # Clave corrupta → regenerar (las credenciales cifradas previas se perderán)
+        key = Fernet.generate_key()
+        key_path.write_bytes(key)
+        return Fernet(key)
 
 
 class LLMClientError(Exception):
@@ -196,16 +224,43 @@ class LLMClient:
             return {}
         with open(self.credentials_path, "r", encoding="utf-8") as f:
             raw = f.read()
-        lines = [l for l in raw.splitlines() if not l.strip().startswith("//")]
-        data = json.loads("\n".join(lines))
-        return data.get("providers", {})
+        data = json.loads(raw)
+
+        # Auto-migración: texto plano → cifrado
+        if not data.get("_encrypted"):
+            providers = data.get("providers", {})
+            self._save_credentials(providers)
+            return providers
+
+        # Descifrar valores
+        fernet = _get_fernet()
+        encrypted_providers = data.get("providers", {})
+        if not fernet:
+            # Sin cryptography → las claves ya están cifradas y no se pueden leer
+            return {}
+        result = {}
+        for name, enc_value in encrypted_providers.items():
+            try:
+                result[name] = fernet.decrypt(enc_value.encode()).decode()
+            except Exception:
+                pass  # Clave corrupta o ilegible → ignorar
+        return result
 
     def _save_credentials(self, creds: Dict[str, str]) -> None:
         self.credentials_path.parent.mkdir(parents=True, exist_ok=True)
+        fernet = _get_fernet()
+        if fernet:
+            encrypted_providers = {
+                name: fernet.encrypt(key.encode()).decode()
+                for name, key in creds.items()
+            }
+        else:
+            encrypted_providers = creds
         with open(self.credentials_path, "w", encoding="utf-8") as f:
             json.dump({
-                "comment": "Este archivo NUNCA se comparte. Las keys se introducen desde el dashboard.",
-                "providers": creds
+                "comment": "Credenciales cifradas con Fernet. La clave de descifrado está en config/.cred_key",
+                "_encrypted": bool(fernet),
+                "providers": encrypted_providers
             }, f, indent=2, ensure_ascii=False)
 
     def get_credential(self, provider_name: str) -> str:

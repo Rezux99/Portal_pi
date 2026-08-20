@@ -40,6 +40,7 @@ CONFIG_DIR = BASE_DIR / "config"
 FEEDS_CONFIG_PATH = CONFIG_DIR / "feeds.json"
 LLM_CONFIG_PATH = CONFIG_DIR / "llm.json"
 CREDENTIALS_PATH = CONFIG_DIR / ".credentials.json"
+CRED_KEY_PATH = CONFIG_DIR / ".cred_key"
 
 # ─── Logs ───────────────────────────────────────────────────────────────
 LOGS_DIR = BASE_DIR / "logs"

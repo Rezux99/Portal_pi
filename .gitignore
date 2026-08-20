@@ -7,7 +7,9 @@
 **/.env.local
 **/.env.production
 **/.credentials.json
+**/.cred_key
 config/.credentials.json
+config/.cred_key
 
 # ─── DATA (generada por el pipeline, no código fuente) ─────────────────
 data/
