@@ -2,8 +2,10 @@
 run_dashboard.py
 Lanza el dashboard de Portal Pi.
 Uso: python scripts/run_dashboard.py [--port 8420]
+Render usa la variable de entorno PORT para asignar el puerto.
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
@@ -18,7 +20,7 @@ import uvicorn
 def main() -> None:
     parser = argparse.ArgumentParser(description="Portal Pi Dashboard")
     parser.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8420, help="Port (default: 8420)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8420)), help="Port (default: PORT env or 8420)")
     args = parser.parse_args()
 
     # Pre-flight

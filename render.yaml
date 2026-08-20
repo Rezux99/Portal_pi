@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: portal-pi
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/run_dashboard.py --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: PORT
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
