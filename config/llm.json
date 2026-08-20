@@ -1,0 +1,100 @@
+{
+  "comment": "Configuración de proveedores LLM. Las API keys se guardan en .credentials.json (separado y seguro).",
+  "active": "auto",
+  "providers": {
+    "groq": {
+      "name": "Groq (Free)",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model": "llama-3.1-8b-instant",
+      "max_tokens": 2048,
+      "temperature": 0.3,
+      "timeout": 30
+    },
+    "nvidia": {
+      "name": "NVIDIA NIM",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "model": "meta/llama-3.1-8b-instruct",
+      "max_tokens": 2048,
+      "temperature": 0.3,
+      "timeout": 60
+    },
+    "gemini_flash": {
+      "name": "Google Gemini Flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "model": "gemini-2.0-flash",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 60
+    },
+    "openrouter_free": {
+      "name": "OpenRouter (Free)",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "meta-llama/llama-3.1-8b-instruct:free",
+      "max_tokens": 2048,
+      "temperature": 0.3,
+      "timeout": 60,
+      "extra_headers": {
+        "HTTP-Referer": "https://portal-pi.local",
+        "X-Title": "Portal Pi"
+      }
+    },
+    "cerebras": {
+      "name": "Cerebras (Free)",
+      "base_url": "https://api.cerebras.ai/v1",
+      "model": "llama3.1-8b",
+      "max_tokens": 2048,
+      "temperature": 0.3,
+      "timeout": 30
+    },
+    "together": {
+      "name": "Together AI (Free)",
+      "base_url": "https://api.together.xyz/v1",
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      "max_tokens": 2048,
+      "temperature": 0.3,
+      "timeout": 60
+    },
+    "modal": {
+      "name": "Modal (GLM-5.1)",
+      "base_url": "https://api.us-west-2.modal.direct/v1",
+      "model": "zai-org/GLM-5.1-FP8",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 120,
+      "streaming": true,
+      "websocket_url": "wss://api.us-west-2.modal.direct/v1"
+    }
+  },
+  "fallback_order": ["modal", "groq", "gemini_flash", "nvidia", "cerebras", "openrouter_free", "together"],
+  "roles": {
+    "extractor": {
+      "description": "Extracción rápida de entidades y datos",
+      "preferred": ["groq", "cerebras", "gemini_flash"],
+      "needs": ["speed"]
+    },
+    "analyst": {
+      "description": "Análisis de sesgo, contexto y patrones",
+      "preferred": ["gemini_flash", "nvidia", "openrouter_free"],
+      "needs": ["reasoning"]
+    },
+    "critic": {
+      "description": "Crítica y validación cruzada de resultados",
+      "preferred": ["gemini_flash", "nvidia", "together"],
+      "needs": ["reasoning"]
+    },
+    "synthesizer": {
+      "description": "Síntesis final y generación de informes",
+      "preferred": ["gemini_flash", "nvidia", "openrouter_free"],
+      "needs": ["writing"]
+    }
+  },
+  "comment_models": {
+    "groq_free": ["llama-3.1-8b-instant", "llama-3.1-70b-versatile", "gemma2-9b-it", "mixtral-8x7b-32768"],
+    "nvidia_free": ["meta/llama-3.1-8b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct", "google/gemma-2-9b-it", "qwen/qwen2.5-7b-instruct"],
+    "gemini_free": ["gemini-2.0-flash", "gemini-2.5-flash-preview-05-20"],
+    "openrouter_free": ["meta-llama/llama-3.1-8b-instruct:free", "google/gemma-2-9b-it:free", "qwen/qwen-2.5-7b-instruct:free"],
+    "cerebras_free": ["llama-3.1-8b", "llama-3.3-70b"],
+    "together_free": ["meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "Qwen/Qwen2.5-7B-Instruct-Turbo"],
+    "modal": ["zai-org/GLM-5.1-FP8"]
+  }
+}

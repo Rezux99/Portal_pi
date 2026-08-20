@@ -1,0 +1,233 @@
+"""
+synergy_router.py
+Orquestador de IA con failover asíncrono, circuit breaker ligero y sinergia por validación.
+"""
+
+from __future__ import annotations
+import asyncio
+import time
+import json
+import logging
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Optional, Awaitable
+
+logger = logging.getLogger("synergy_router")
+
+# ==========================================
+# 1. INFRAESTRUCTURA LIGERA (Sin hilos extra)
+# ==========================================
+
+class CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+class LiteCircuitBreaker:
+    """CB asíncrono sin locks de hilos, basado en tiempo y contadores."""
+    def __init__(self, failure_threshold: int = 3, recovery_s: int = 30):
+        self.failure_threshold = failure_threshold
+        self.recovery_s = recovery_s
+        self._failures = 0
+        self._state = CircuitState.CLOSED
+        self._opened_at = 0.0
+
+    def is_available(self) -> bool:
+        if self._state == CircuitState.OPEN:
+            if time.monotonic() - self._opened_at > self.recovery_s:
+                self._state = CircuitState.HALF_OPEN
+                logger.info("CB transicionando a HALF_OPEN para prueba.")
+                return True
+            return False
+        return True
+
+    def record_success(self):
+        self._failures = 0
+        if self._state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.CLOSED
+            logger.info("CB cerrado nuevamente. Proveedor recuperado.")
+
+    def record_failure(self):
+        self._failures += 1
+        if self._state == CircuitState.HALF_OPEN or self._failures >= self.failure_threshold:
+            self._state = CircuitState.OPEN
+            self._opened_at = time.monotonic()
+            logger.warning(f"CB ABIERTO. Proveedor aislado por {self.recovery_s}s.")
+
+
+@dataclass
+class ProviderProfile:
+    name: str
+    handler: Callable[[str, dict], Awaitable[str]]  # async def prompt(text, opts) -> str
+    weight: float = 1.0
+    speed_tier: int = 1  # 1=Fast (Groq), 2=Medium (Nvidia/GLM), 3=Slow (OpenRouter)
+    breaker: LiteCircuitBreaker = field(default_factory=LiteCircuitBreaker)
+    total_calls: int = 0
+    total_failures: int = 0
+
+
+# ==========================================
+# 2. ROUTER SINÉRGICO
+# ==========================================
+
+class SynergyRouter:
+    """
+    Ejecuta peticiones LLM garantizando que el costo extra de múltiples 
+    proveedores solo se pague si la calidad/estructura lo requiere.
+    """
+    def __init__(self):
+        self.providers: dict[str, ProviderProfile] = {}
+        
+    def register_provider(self, profile: ProviderProfile):
+        self.providers[profile.name] = profile
+
+    async def _safe_call(self, provider_name: str, prompt: str, opts: dict) -> Optional[str]:
+        """Llama a un proveedor respetando el Circuit Breaker."""
+        p = self.providers.get(provider_name)
+        if not p or not p.breaker.is_available():
+            return None
+
+        p.total_calls += 1
+        try:
+            # Timeout estricto para no bloquear el event loop
+            result = await asyncio.wait_for(p.handler(prompt, opts), timeout=opts.get("timeout", 15.0))
+            p.breaker.record_success()
+            return result
+        except Exception as e:
+            p.total_failures += 1
+            p.breaker.record_failure()
+            logger.error(f"Proveedor {p.name} falló: {e}. Activando failover.")
+            return None
+
+    async def execute_with_synergy(
+        self, 
+        prompt: str, 
+        opts: dict = None,
+        validator: Callable[[str], bool] = None  # Función que devuelve True si el output es válido
+    ) -> str:
+        """
+        Flujo sinérgico:
+        1. Groq intenta rápido.
+        2. Si pasa el validador, retorna (Costo mínimo).
+        3. Si falla el validador, GLM/Nvidia lo corrige.
+        4. Si Groq está caído, failover a Nvidia.
+        """
+        opts = opts or {}
+        validator = validator or (lambda x: True) # Default: todo es válido
+        
+        # --- FASE 1: Intento Rápido (Groq) ---
+        fast_provider = "groq"
+        draft = await self._safe_call(fast_provider, prompt, opts)
+        
+        if draft and validator(draft):
+            logger.debug("Sinergia: Borrador rápido validado exitosamente.")
+            return draft
+            
+        # --- FASE 2: Corrección o Failover ---
+        # Si Groq falló estructuralmente, pedimos a un modelo más "pensante" que lo arregle
+        # pasándole el borrador defectuoso como contexto. (Ej: GLM o Nvidia)
+        
+        correction_prompt = prompt
+        if draft:
+            # ¡SINERGIA REAL! Usamos el output basura de Groq como contexto para ahorrar tokens en el modelo corrector
+            correction_prompt = (
+                f"El siguiente output generado previamente es inválido o está mal formateado:\n```\n{draft}\n```\n"
+                f"Por favor, corrígelo y responde correctamente a la petición original:\n{prompt}"
+            )
+            logger.info("Sinergia activada: Corrigiendo borrador defectuoso.")
+        else:
+            logger.info("Failover: Proveedor principal caído, redirigiendo a secundario.")
+
+        # Probar proveedores secundarios en orden de preferencia (exclude fast_provider)
+        secondary_targets = ["glm", "nvidia", "openrouter"]
+        
+        for target in secondary_targets:
+            if target not in self.providers: continue
+            
+            result = await self._safe_call(target, correction_prompt, opts)
+            if result and validator(result):
+                logger.debug(f"Sinergia completada con {target}.")
+                return result
+                
+        # Último recurso: OpenRouter (suele ser el más caro/variable)
+        if "openrouter" in self.providers and "openrouter" not in secondary_targets:
+            result = await self._safe_call("openrouter", correction_prompt, opts)
+            if result: return result
+
+        raise RuntimeError("Todos los proveedores fallaron o devolvieron resultados inválidos.")
+
+    def get_telemetry(self) -> dict:
+        """Reporta salud del sistema sin coste de rendimiento."""
+        return {
+            name: {
+                "state": p.breaker._state.value,
+                "calls": p.total_calls,
+                "failures": p.total_failures,
+                "availability": p.breaker.is_available()
+            } for name, p in self.providers.items()
+        }
+
+# ==========================================
+# 3. EJEMPLO DE USO Y MOCKS
+# ==========================================
+
+# Simulamos los clientes de los LLMs (Aquí pondrías tus wrappers de LangChain o SDKs nativos)
+async def mock_groq_call(prompt: str, opts: dict) -> str:
+    await asyncio.sleep(0.05) # Groq es instantáneo
+    # Simulamos que a veces devuelve JSON roto
+    if "json" in prompt.lower() and "error" in prompt.lower():
+        return '{"result": "value", "missing_closing_bracket": true'
+    return '{"result": "success", "source": "groq"}'
+
+async def mock_glm_call(prompt: str, opts: dict) -> str:
+    await asyncio.sleep(0.5) # GLM tarda un poco más
+    # GLM siempre corrige perfecto
+    return '{"result": "success", "source": "glm_corrected", "validated": true}'
+
+async def mock_nvidia_call(prompt: str, opts: dict) -> str:
+    await asyncio.sleep(0.4)
+    return '{"result": "success", "source": "nvidia"}'
+
+# Validador estricto para extracción de JSON
+def is_valid_json(text: str) -> bool:
+    try:
+        json.loads(text)
+        return True
+    except:
+        return False
+
+async def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    
+    router = SynergyRouter()
+    
+    # Registro de tus proveedores configurados
+    router.register_provider(ProviderProfile(name="groq", handler=mock_groq_call, speed_tier=1))
+    router.register_provider(ProviderProfile(name="glm", handler=mock_glm_call, speed_tier=2))
+    router.register_provider(ProviderProfile(name="nvidia", handler=mock_nvidia_call, speed_tier=2))
+    # openrouter_register_provider(...)
+
+    print("--- CASO 1: Petición normal (Groq responde bien) ---")
+    res1 = await router.execute_with_synergy("Genera un json de éxito", validator=is_valid_json)
+    print(f"Resultado 1: {res1}\n")
+    
+    print("--- CASO 2: Sinergia de Corrección (Groq falla, GLM corrige) ---")
+    # En este prompt, forzamos al mock de Groq a devolver JSON roto
+    res2 = await router.execute_with_synergy("Genera un json con error", validator=is_valid_json)
+    print(f"Resultado 2: {res2}\n")
+    
+    print("--- CASO 3: Failover por Circuit Breaker ---")
+    # Simulamos que Groq se cae por completo cambiando su handler
+    async def groq_dead(prompt, opts):
+        raise ConnectionError("API Timeout")
+    router.providers["groq"].handler = groq_dead
+    
+    res3 = await router.execute_with_synergy("Genera un json de éxito", validator=is_valid_json)
+    print(f"Resultado 3: {res3}\n")
+    
+    print("--- TELEMETRÍA FINAL ---")
+    import json
+    print(json.dumps(router.get_telemetry(), indent=2))
+
+if __name__ == "__main__":
+    asyncio.run(main())

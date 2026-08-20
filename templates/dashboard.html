@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Pi — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ═══════════════════ LOGIN ═══════════════════ -->
+<div class="login-page" id="login-page" style="display:none">
+    <div class="login-card">
+        <div class="login-logo">◈ Portal Pi</div>
+        <p class="login-subtitle">Inteligencia periodística</p>
+        <div class="login-tabs">
+            <button class="login-tab active" id="login-tab-btn" onclick="switchLoginTab('login')">Iniciar sesión</button>
+            <button class="login-tab" id="register-tab-btn" onclick="switchLoginTab('register')">Registrarse</button>
+        </div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+            <input id="login-email" type="email" class="login-input" placeholder="Email" required>
+            <input id="login-password" type="password" class="login-input" placeholder="Contraseña" required>
+            <button type="submit" class="login-btn" id="login-submit">Entrar</button>
+        </form>
+        <form id="register-form" onsubmit="handleLogin(event)" style="display:none">
+            <input id="register-email" type="email" class="login-input" placeholder="Email" required>
+            <input id="register-display" type="text" class="login-input" placeholder="Nombre (opcional)">
+            <input id="register-password" type="password" class="login-input" placeholder="Contraseña (min 6 chars)" required minlength="6">
+            <button type="submit" class="login-btn" id="register-submit">Crear cuenta</button>
+        </form>
+        <div id="login-error" class="login-error" style="display:none"></div>
+    </div>
+</div>
+
+<!-- ═══════════════════ APP ═══════════════════ -->
+<div id="dashboard-app" style="display:none">
+
+<!-- TOPBAR -->
+<header class="topbar">
+    <div class="logo">Portal Pi</div>
+    <div class="topbar-sep"></div>
+    <div class="status-pill" id="status-pill">● CARGANDO</div>
+    <div class="stage-badge" id="stage-badge">IDLE</div>
+    <div class="llm-badge" id="llm-badge">🤖 —</div>
+    <div class="topbar-spacer"></div>
+    <button class="btn-ghost" id="btn-ingest" onclick="runIngest()">⬇ Ingestar</button>
+    <button class="btn-accent" id="btn-pipeline" onclick="runPipeline()">▶ Pipeline</button>
+    <button class="btn-ghost btn-icon" onclick="refreshAll()" title="Refrescar">↻</button>
+    <div class="user-badge" id="user-badge" style="display:none">
+        <span id="user-email"></span>
+        <button class="btn-ghost btn-sm" onclick="handleLogout()">Salir</button>
+    </div>
+</header>
+
+<!-- PIPELINE PROGRESS (shown when running) -->
+<div class="pipeline-bar" id="pipeline-bar" style="display:none">
+    <div class="pipeline-bar-label" id="pipeline-label">Pipeline en curso...</div>
+    <div class="pipeline-bar-track"><div class="pipeline-bar-fill" id="pipeline-fill"></div></div>
+</div>
+
+<!-- BODY: main + chat sidebar -->
+<div class="body-layout">
+
+    <!-- MAIN CONTENT -->
+    <div class="main-area">
+
+        <!-- NAV -->
+        <nav class="nav">
+            <button class="nav-item active" data-tab="news" onclick="switchTab('news')">📰 Noticias</button>
+            <button class="nav-item" data-tab="pipeline" onclick="switchTab('pipeline')">⚡ Pipeline</button>
+            <button class="nav-item" data-tab="data" onclick="switchTab('data')">🧠 Datos</button>
+            <button class="nav-item" data-tab="reports" onclick="switchTab('reports')">📄 Informes</button>
+            <button class="nav-item" data-tab="config" onclick="switchTab('config')">⚙️ Config</button>
+        </nav>
+
+        <!-- CONTENT PANELS -->
+        <div class="content-scroll">
+
+            <!-- ──── NEWS ──── -->
+            <section id="tab-news" class="panel active">
+                <div class="section-bar">
+                    <h2>Noticias</h2>
+                    <div class="section-actions">
+                        <label class="filter-toggle"><input type="checkbox" id="filter-accessible" checked onchange="toggleRawFilter()"> Solo fuentes accesibles</label>
+                        <button class="btn-accent btn-sm" onclick="runIngest()">⬇ Ingestar</button>
+                    </div>
+                </div>
+                <div class="news-stats" id="news-stats"></div>
+                <div class="news-grid" id="news-grid"></div>
+                <div class="raw-detail" id="raw-detail" style="display:none">
+                    <div class="raw-detail-header">
+                        <button class="btn-ghost" onclick="closeRawDetail()">← Volver</button>
+                        <span id="raw-detail-title" class="raw-detail-heading"></span>
+                    </div>
+                    <div id="raw-detail-content"></div>
+                </div>
+            </section>
+
+            <!-- ──── PIPELINE ──── -->
+            <section id="tab-pipeline" class="panel">
+                <div class="section-bar"><h2>Pipeline Cognitivo</h2></div>
+
+                <!-- Pipeline Hero -->
+                <div class="pipeline-hero">
+                    <div class="pipeline-hero-flow">
+                        <div class="pf-step" id="ps-ingest"><div class="pf-num">1</div><div class="pf-label">Ingestar</div></div>
+                        <div class="pf-arrow">→</div>
+                        <div class="pf-step" id="ps-extract"><div class="pf-num">2</div><div class="pf-label">Extraer</div></div>
+                        <div class="pf-arrow">→</div>
+                        <div class="pf-step" id="ps-classify"><div class="pf-num">3</div><div class="pf-label">Clasificar</div></div>
+                        <div class="pf-arrow">→</div>
+                        <div class="pf-step" id="ps-synthesize"><div class="pf-num">4</div><div class="pf-label">Sintetizar</div></div>
+                        <div class="pf-arrow">→</div>
+                        <div class="pf-step" id="ps-actions"><div class="pf-num">5</div><div class="pf-label">Acciones</div></div>
+                    </div>
+                    <div class="pipeline-hero-stats" id="pipeline-hero-stats"></div>
+                </div>
+
+                <!-- Pipeline actions -->
+                <div class="pipeline-actions">
+                    <button class="btn-accent" onclick="runPipeline()">▶ Pipeline Simple</button>
+                    <button class="btn-outline" onclick="runMultiAgent()">🧠 Multi-Agente</button>
+                    <button class="btn-outline btn-green" onclick="runOrchestrated()">🎯 Orquestado</button>
+                    <button class="btn-outline" onclick="testLLM()">🔌 Test LLM</button>
+                </div>
+
+                <!-- Scheduler -->
+                <div class="collapsible" id="scheduler-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('scheduler-section')">
+                        <span>🔄 Auto-Scheduler</span>
+                        <span class="collapsible-icon" id="scheduler-icon">▾</span>
+                    </div>
+                    <div class="collapsible-body">
+                        <div class="stats-row" id="scheduler-stats"></div>
+                        <div class="sched-controls">
+                            <button class="btn-accent btn-sm" id="btn-sched-start" onclick="schedulerStart()">▶ Iniciar</button>
+                            <button class="btn-danger btn-sm" id="btn-sched-stop" onclick="schedulerStop()" style="display:none">■ Detener</button>
+                            <label class="inline-label">Intervalo (min): <input type="number" id="sched-interval-input" class="input-sm" value="30" min="5" max="1440"></label>
+                            <label class="inline-label"><input type="checkbox" id="sched-auto-pipeline" checked> Auto-pipeline</label>
+                            <label class="inline-label"><input type="checkbox" id="sched-auto-start"> Auto-arrancar</label>
+                        </div>
+                        <div id="sched-history" style="margin-top:12px"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ──── DATA ──── -->
+            <section id="tab-data" class="panel">
+                <div class="section-bar">
+                    <h2>Datos del Pipeline</h2>
+                    <div class="sub-tabs">
+                        <button class="sub-tab active" data-sub="entities" onclick="switchDataSub('entities')">Entidades</button>
+                        <button class="sub-tab" data-sub="relations" onclick="switchDataSub('relations')">Relaciones</button>
+                        <button class="sub-tab" data-sub="syntheses" onclick="switchDataSub('syntheses')">Síntesis</button>
+                        <button class="sub-tab" data-sub="classifications" onclick="switchDataSub('classifications')">Clasificaciones</button>
+                        <button class="sub-tab" data-sub="actions" onclick="switchDataSub('actions')">Acciones</button>
+                    </div>
+                </div>
+                <div id="data-content"></div>
+            </section>
+
+            <!-- ──── REPORTS ──── -->
+            <section id="tab-reports" class="panel">
+                <div class="section-bar">
+                    <h2>Informes de Inteligencia</h2>
+                    <button class="btn-accent btn-sm" onclick="generateReport()">+ Generar</button>
+                </div>
+                <div id="reports-list"></div>
+                <div id="report-viewer" style="display:none">
+                    <div class="section-bar">
+                        <button class="btn-ghost" onclick="closeReport()">← Volver</button>
+                        <span id="report-title" style="font-weight:600"></span>
+                    </div>
+                    <div class="report-content" id="report-content"></div>
+                </div>
+            </section>
+
+            <!-- ──── CONFIG ──── -->
+            <section id="tab-config" class="panel">
+                <div class="section-bar"><h2>Configuración</h2></div>
+
+                <!-- LLM Providers -->
+                <div class="config-section">
+                    <div class="config-section-header">
+                        <span>🤖 Proveedores LLM</span>
+                        <button class="btn-accent btn-sm" onclick="testLLM()">🔌 Test All</button>
+                    </div>
+                    <div class="config-section-hint">Las API keys se guardan localmente en config/.credentials.json — nunca salen de tu máquina</div>
+                    <div id="llm-providers-list"></div>
+                </div>
+
+                <!-- Router Status -->
+                <div class="collapsible" id="router-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('router-section')">
+                        <span>⚡ Router & Sinergia</span>
+                        <span class="collapsible-icon">▸</span>
+                    </div>
+                    <div class="collapsible-body" style="display:none">
+                        <div id="router-content"></div>
+                    </div>
+                </div>
+
+                <!-- Feeds -->
+                <div class="collapsible" id="feeds-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('feeds-section')">
+                        <span>📡 Feeds RSS</span>
+                        <span class="collapsible-icon">▸</span>
+                    </div>
+                    <div class="collapsible-body" style="display:none">
+                        <div class="form-row" id="add-feed-form" style="display:none">
+                            <input id="feed-name" placeholder="Nombre" class="input">
+                            <input id="feed-url" placeholder="URL del feed RSS" class="input" style="flex:2">
+                            <select id="feed-category" class="input">
+                                <option>Tecnología</option><option>Política</option><option>Economía</option>
+                                <option>Seguridad</option><option>Ciencia</option><option>Deportes</option><option>Sociedad</option><option>Otro</option>
+                            </select>
+                            <button class="btn-accent btn-sm" onclick="addFeed()">Añadir</button>
+                            <button class="btn-ghost btn-sm" onclick="hideAddFeed()">Cancelar</button>
+                        </div>
+                        <button class="btn-outline btn-sm" id="btn-add-feed" onclick="showAddFeed()" style="margin-bottom:12px">+ Añadir Feed</button>
+                        <div id="feeds-table"></div>
+                    </div>
+                </div>
+
+                <!-- Logs -->
+                <div class="collapsible" id="logs-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('logs-section')">
+                        <span>📋 Logs del Sistema</span>
+                        <span class="collapsible-icon">▸</span>
+                    </div>
+                    <div class="collapsible-body" style="display:none">
+                        <div class="sub-tabs" style="margin-bottom:12px">
+                            <button class="sub-tab active" data-logsub="orchestrator" onclick="switchLogSub('orchestrator')">Orquestador</button>
+                            <button class="sub-tab" data-logsub="ingester" onclick="switchLogSub('ingester')">Ingester</button>
+                            <button class="sub-tab" data-logsub="llm" onclick="switchLogSub('llm')">LLM</button>
+                            <button class="sub-tab" data-logsub="scheduler" onclick="switchLogSub('scheduler')">Scheduler</button>
+                        </div>
+                        <pre class="log-box" id="log-content">Cargando...</pre>
+                    </div>
+                </div>
+
+                <!-- State -->
+                <div class="collapsible" id="state-section">
+                    <div class="collapsible-header" onclick="toggleCollapsible('state-section')">
+                        <span>⚙️ Estado del Sistema</span>
+                        <span class="collapsible-icon">▸</span>
+                    </div>
+                    <div class="collapsible-body" style="display:none">
+                        <pre class="state-box" id="state-content">Cargando...</pre>
+                    </div>
+                </div>
+            </section>
+
+        </div><!-- /content-scroll -->
+    </div><!-- /main-area -->
+
+    <!-- CHAT SIDEBAR -->
+    <aside class="chat-panel" id="chat-panel">
+        <div class="chat-header">
+            <span class="chat-title">💬 Chat AI</span>
+            <select id="chat-provider" class="chat-provider-select"></select>
+            <button class="btn-ghost btn-sm" onclick="testChatConnection()" title="Test conexión">🔌</button>
+            <button class="btn-ghost btn-icon btn-sm" id="chat-toggle" onclick="toggleChat()" title="Colapsar chat">◂</button>
+        </div>
+        <div class="chat-ws-status" id="chat-ws-status">○ Desconectado</div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg system">
+                <div class="chat-msg-text">Conectado al motor de inteligencia. Selecciona un proveedor y escribe tu consulta.</div>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <button class="btn-ghost btn-icon btn-sm" onclick="webSearchChat()" title="Buscar en la web">🔍</button>
+            <input type="text" id="chat-input" class="chat-input-field" placeholder="Escribe tu mensaje... (/buscar para web)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}">
+            <button class="btn-accent btn-sm" id="chat-send-btn" onclick="sendChat()">➤</button>
+            <button class="btn-ghost btn-icon btn-sm" onclick="clearChat()" title="Limpiar">🗑</button>
+        </div>
+    </aside>
+
+</div><!-- /body-layout -->
+
+</div><!-- /dashboard-app -->
+
+<!-- LOCAL MODE HINT -->
+<div class="local-mode-hint" id="local-mode-hint" style="display:none">🖥 Modo local</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

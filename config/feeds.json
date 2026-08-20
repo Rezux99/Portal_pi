@@ -1,0 +1,111 @@
+{
+  "feeds": [
+    {
+      "name": "Google News - Technology",
+      "url": "https://news.google.com/rss/search?q=technology+news&hl=en-US&gl=US&ceid=US:en",
+      "category": "Tecnología",
+      "enabled": false,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "Google News - Ciencia",
+      "url": "https://news.google.com/rss/search?q=science+research&hl=en-US&gl=US&ceid=US:en",
+      "category": "Ciencia",
+      "enabled": false,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "Google News - Seguridad",
+      "url": "https://news.google.com/rss/search?q=cybersecurity+privacy&hl=en-US&gl=US&ceid=US:en",
+      "category": "Seguridad",
+      "enabled": false,
+      "poll_interval_min": 60
+    },
+    {
+      "name": "Reuters Technology",
+      "url": "https://feeds.reuters.com/reuters/technologyNews",
+      "category": "Tecnología",
+      "enabled": false,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "BBC Technology",
+      "url": "http://feeds.bbci.co.uk/news/technology/rss.xml",
+      "category": "Tecnología",
+      "enabled": true,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/technology-lab",
+      "category": "Tecnología",
+      "enabled": true,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "category": "Tecnología",
+      "enabled": true,
+      "poll_interval_min": 30
+    },
+    {
+      "name": "Reuters Science",
+      "url": "https://feeds.reuters.com/reuters/scienceNews",
+      "category": "Ciencia",
+      "enabled": false,
+      "poll_interval_min": 60
+    },
+    {
+      "name": "BBC Science",
+      "url": "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "category": "Ciencia",
+      "enabled": true,
+      "poll_interval_min": 60
+    },
+    {
+      "name": "Krebs on Security",
+      "url": "https://krebsonsecurity.com/feed/",
+      "category": "Seguridad",
+      "enabled": true,
+      "poll_interval_min": 60
+    },
+    {
+      "name": "The Hacker News",
+      "url": "https://feeds.feedburner.com/TheHackersNews",
+      "category": "Seguridad",
+      "enabled": true,
+      "poll_interval_min": 60
+    },
+
+    {"name": "Reuters Business", "url": "https://feeds.reuters.com/reuters/businessNews", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "BBC Business", "url": "http://feeds.bbci.co.uk/news/business/rss.xml", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "Financial Times", "url": "https://www.ft.com/rss/home", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "The Economist", "url": "https://www.economist.com/rss", "category": "Economía", "enabled": true, "poll_interval_min": 60},
+    {"name": "Google News - Economía ES", "url": "https://news.google.com/rss/search?q=econom%C3%ADa+mercados+finanzas&hl=es&gl=ES&ceid=ES:es", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "Google News - Economy EN", "url": "https://news.google.com/rss/search?q=economy+finance+markets&hl=en-US&gl=US&ceid=US:en", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "MarketWatch", "url": "https://feeds.marketwatch.com/marketwatch/topstories/", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+    {"name": "CNBC Top News", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147", "category": "Economía", "enabled": true, "poll_interval_min": 30},
+
+    {"name": "BBC Politics", "url": "http://feeds.bbci.co.uk/news/politics/rss.xml", "category": "Política", "enabled": true, "poll_interval_min": 30},
+    {"name": "Reuters Politics", "url": "https://feeds.reuters.com/reuters/PoliticsNews", "category": "Política", "enabled": true, "poll_interval_min": 30},
+    {"name": "Google News - Política ES", "url": "https://news.google.com/rss/search?q=pol%C3%ADtica+gobierno+geopol%C3%ADtica&hl=es&gl=ES&ceid=ES:es", "category": "Política", "enabled": true, "poll_interval_min": 30},
+    {"name": "Google News - Politics EN", "url": "https://news.google.com/rss/search?q=politics+government+geopolitics&hl=en-US&gl=US&ceid=US:en", "category": "Política", "enabled": true, "poll_interval_min": 30},
+    {"name": "The Guardian - Politics", "url": "https://www.theguardian.com/politics/rss", "category": "Política", "enabled": true, "poll_interval_min": 30},
+    {"name": "Politico", "url": "https://rss.politico.com/politics-news.xml", "category": "Política", "enabled": true, "poll_interval_min": 30},
+
+    {"name": "Google News - Geopolitics", "url": "https://news.google.com/rss/search?q=geopolitics+international+relations+conflict&hl=en-US&gl=US&ceid=US:en", "category": "Política", "enabled": true, "poll_interval_min": 60},
+    {"name": "Foreign Affairs", "url": "https://www.foreignaffairs.com/rss.xml", "category": "Política", "enabled": true, "poll_interval_min": 60}
+  ],
+  "settings": {
+    "max_articles_per_feed": 10,
+    "user_agent": "PortalPi/1.0 (News Aggregator)",
+    "dedup_by_title": true,
+    "auto_ingest_on_start": false,
+    "scheduler": {
+      "ingest_interval_min": 30,
+      "auto_pipeline": true,
+      "enabled": true
+    }
+  }
+}

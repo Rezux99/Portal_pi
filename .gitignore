@@ -1,0 +1,59 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Portal Pi — .gitignore
+# ═══════════════════════════════════════════════════════════════════════
+
+# ─── SECRETS & CREDENTIALS (NUNCA subir) ───────────────────────────────
+**/.env
+**/.env.local
+**/.env.production
+**/.credentials.json
+config/.credentials.json
+
+# ─── DATA (generada por el pipeline, no código fuente) ─────────────────
+data/
+state/
+
+# ─── LOGS ──────────────────────────────────────────────────────────────
+logs/
+*.log
+_*.log
+
+# ─── DATABASES ─────────────────────────────────────────────────────────
+*.db
+*.sqlite3
+
+# ─── PYTHON ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ─── VENV / DEPENDENCIES ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+Pipfile.lock
+
+# ─── IDE / EDITOR ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── PATCH / TEMP SCRIPTS (artefactos de desarrollo) ──────────────────
+_patch_hybrid.py
+fix_esc.py
+
+# ─── DUMPS (contiene representación del repo, puede tener refs a keys) ─
+project_dump.txt
+
+# ─── OS ────────────────────────────────────────────────────────────────
+Desktop.ini
+ehthumbs.db
