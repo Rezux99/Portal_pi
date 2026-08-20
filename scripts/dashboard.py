@@ -50,6 +50,14 @@ state_mgr = StateManager(str(STATE_PATH))
 ingester = FeedIngester()
 scheduler = PipelineScheduler()
 
+
+def _get_db():
+    """Retorna Supabase DB si está configurado, si no la DB local SQLite."""
+    supa_db = _get_supabase_db()
+    if supa_db:
+        return supa_db
+    return db
+
 # LLM - se inicializa bajo demanda
 _llm_client: Optional[LLMClient] = None
 _pipeline_lock = threading.Lock()
@@ -200,7 +208,7 @@ async def api_status():
             "pipeline_stage": state["execution_pointers"]["current_pipeline_stage"],
             "global_status": state["flags"]["global_status"],
             "last_task": state["execution_pointers"].get("last_completed_task"),
-            "db_counts": db.stats(),
+            "db_counts": _get_db().stats(),
             "ingester": ingester.stats(),
             "ingest_running": _ingest_status["running"],
             "llm": llm_info,
@@ -218,56 +226,74 @@ async def api_overview():
     except Exception:
         state = {"execution_pointers": {}, "flags": {}}
 
-    db_counts = db.stats()
+    db_counts = _get_db().stats()
     ing_stats = ingester.stats()
 
     # ── Noticias recientes (título + fuente + fecha) ──
     recent_news = []
-    try:
-        files = sorted(RAW_DIR.glob("*.txt"), key=lambda f: f.stat().st_mtime, reverse=True)
-        for fp in files[:12]:
-            try:
-                content = fp.read_text(encoding="utf-8")
-                parsed = _parse_raw_article(content)
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            result = supa_db._client.table("raw_news").select("filename,title,source,category,published,link,link_type").order("ingested_at", desc=True).limit(12).execute()
+            for row in result.data:
+                link = row.get("link", "")
                 recent_news.append({
-                    "filename": fp.name,
-                    "title": parsed.get("title", "") or fp.stem.replace("_", " "),
-                    "source": parsed.get("source", ""),
-                    "category": parsed.get("category", ""),
-                    "published": parsed.get("published", ""),
-                    "link_type": parsed.get("link_type", "none"),
-                    "effective_link": parsed.get("effective_link", ""),
+                    "filename": row.get("filename", ""),
+                    "title": row.get("title", "") or row.get("filename", "").replace("_", " "),
+                    "source": row.get("source", ""),
+                    "category": row.get("category", ""),
+                    "published": row.get("published", ""),
+                    "link_type": row.get("link_type", "none"),
+                    "effective_link": link,
                 })
-            except Exception:
-                pass
-    except Exception:
-        pass
+        except Exception:
+            pass
+    if not recent_news:
+        try:
+            files = sorted(RAW_DIR.glob("*.txt"), key=lambda f: f.stat().st_mtime, reverse=True)
+            for fp in files[:12]:
+                try:
+                    content = fp.read_text(encoding="utf-8")
+                    parsed = _parse_raw_article(content)
+                    recent_news.append({
+                        "filename": fp.name,
+                        "title": parsed.get("title", "") or fp.stem.replace("_", " "),
+                        "source": parsed.get("source", ""),
+                        "category": parsed.get("category", ""),
+                        "published": parsed.get("published", ""),
+                        "link_type": parsed.get("link_type", "none"),
+                        "effective_link": parsed.get("effective_link", ""),
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     # ── Últimas síntesis (no solo una) ──
     recent_syntheses = []
     try:
-        recent_syntheses = db.list_syntheses(limit=5)
+        recent_syntheses = _get_db().list_syntheses(limit=5)
     except Exception:
         pass
 
     # ── Clasificaciones recientes ──
     recent_classifications = []
     try:
-        recent_classifications = db.list_classifications(limit=3)
+        recent_classifications = _get_db().list_classifications(limit=3)
     except Exception:
         pass
 
     # ── Acciones pendientes ──
     recent_actions = []
     try:
-        recent_actions = db.list_action_items(limit=8)
+        recent_actions = _get_db().list_action_items(limit=8)
     except Exception:
         pass
 
     # ── Top entidades (agrupadas por tipo, no nombres sueltos) ──
     entity_summary = {"total": 0, "by_type": {}, "top_names": []}
     try:
-        all_entities = db.list_entities(limit=200)
+        all_entities = _get_db().list_entities(limit=200)
         entity_summary["total"] = len(all_entities)
         by_type: Dict[str, int] = {}
         top_names = []
@@ -321,37 +347,37 @@ async def api_overview():
 
 @app.get("/api/entities")
 async def api_entities(limit: int = Query(100, ge=1, le=500)):
-    try: return db.list_entities(limit=limit)
+    try: return _get_db().list_entities(limit=limit)
     except: return []
 
 
 @app.get("/api/entities/search")
 async def api_entities_search(name: str = Query(..., min_length=1)):
-    try: return db.search_entities(name)
+    try: return _get_db().search_entities(name)
     except: return []
 
 
 @app.get("/api/relations")
 async def api_relations(limit: int = Query(100, ge=1, le=500)):
-    try: return db.list_relations(limit=limit)
+    try: return _get_db().list_relations(limit=limit)
     except: return []
 
 
 @app.get("/api/syntheses")
 async def api_syntheses(limit: int = Query(50, ge=1, le=200)):
-    try: return db.list_syntheses(limit=limit)
+    try: return _get_db().list_syntheses(limit=limit)
     except: return []
 
 
 @app.get("/api/classifications")
 async def api_classifications(limit: int = Query(100, ge=1, le=500)):
-    try: return db.list_classifications(limit=limit)
+    try: return _get_db().list_classifications(limit=limit)
     except: return []
 
 
 @app.get("/api/action_items")
 async def api_action_items(limit: int = Query(100, ge=1, le=500)):
-    try: return db.list_action_items(limit=limit)
+    try: return _get_db().list_action_items(limit=limit)
     except: return []
 
 
@@ -406,6 +432,34 @@ def _parse_raw_article(content: str) -> dict:
 
 @app.get("/api/raw_news")
 async def api_raw_news(limit: int = Query(50, ge=1, le=200)):
+    # ── Modo Supabase ──
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            result = supa_db._client.table("raw_news").select("*").order("ingested_at", desc=True).limit(limit).execute()
+            items = []
+            for row in result.data:
+                content = row.get("content", "")
+                items.append({
+                    "filename": row.get("filename", ""),
+                    "size_bytes": len(content),
+                    "preview": content[:500],
+                    "title": row.get("title", "") or row.get("filename", "").replace("_", " "),
+                    "source": row.get("source", ""),
+                    "category": row.get("category", ""),
+                    "link": row.get("link", ""),
+                    "link_resolved": "",
+                    "link_type": row.get("link_type", ""),
+                    "effective_link": row.get("link", ""),
+                    "published": row.get("published", ""),
+                    "ingested_at": str(row.get("ingested_at", "")),
+                    "body": content,
+                })
+            return items
+        except Exception:
+            pass  # Fall through to local
+
+    # ── Modo local (filesystem) ──
     try:
         files = sorted(RAW_DIR.glob("*.txt")) + sorted(RAW_DIR.glob("*.md"))
         result = []
@@ -435,7 +489,35 @@ async def api_raw_news(limit: int = Query(50, ge=1, le=200)):
 
 @app.get("/api/raw_news/{filename}")
 async def api_raw_news_detail(filename: str):
-    """Devuelve el contenido completo de un archivo raw."""
+    """Devuelve el contenido completo de un artículo raw."""
+
+    # ── Modo Supabase ──
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            result = supa_db._client.table("raw_news").select("*").eq("filename", filename).execute()
+            if result.data:
+                row = result.data[0]
+                content = row.get("content", "")
+                return {
+                    "filename": row.get("filename", ""),
+                    "content": content,
+                    "size_bytes": len(content),
+                    "title": row.get("title", "") or row.get("filename", "").replace("_", " "),
+                    "source": row.get("source", ""),
+                    "category": row.get("category", ""),
+                    "link": row.get("link", ""),
+                    "link_resolved": "",
+                    "link_type": row.get("link_type", ""),
+                    "effective_link": row.get("link", ""),
+                    "published": row.get("published", ""),
+                    "ingested_at": str(row.get("ingested_at", "")),
+                    "body": content,
+                }
+        except Exception:
+            pass  # Fall through to local
+
+    # ── Modo local (filesystem) ──
     fp = RAW_DIR / filename
     if not fp.exists() or not fp.is_file():
         return {"status": "error", "message": "Archivo no encontrado"}
@@ -538,6 +620,16 @@ async def api_report_detail(filename: str):
 
 @app.get("/api/feeds")
 async def api_feeds():
+    # ── Modo Supabase ──
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            feeds = supa_db.list_feed_configs()
+            return [{"name": f.get("name", ""), "url": f.get("url", ""), "category": f.get("category", "Otro"),
+                     "enabled": f.get("enabled", True), "poll_interval_min": f.get("poll_interval_min", 30)} for f in feeds]
+        except Exception:
+            pass  # Fall through to local
+    # ── Modo local ──
     try: return ingester.list_feeds()
     except: return []
 
@@ -548,6 +640,14 @@ async def api_feeds_add(request: Request):
     except: return {"status": "error", "message": "JSON inválido"}
     name, url, cat = body.get("name", ""), body.get("url", ""), body.get("category", "Otro")
     if not name or not url: return {"status": "error", "message": "name y url requeridos"}
+    # ── Modo Supabase ──
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            supa_db.upsert_feed_config(name, url, cat, True, 30)
+            return {"status": "ok", "feed": {"name": name, "url": url, "category": cat, "enabled": True}}
+        except Exception as e: return {"status": "error", "message": str(e)}
+    # ── Modo local ──
     try: return {"status": "ok", "feed": ingester.add_feed(name, url, cat)}
     except Exception as e: return {"status": "error", "message": str(e)}
 
@@ -557,6 +657,17 @@ async def api_feeds_toggle(request: Request):
     try: body = await request.json()
     except: return {"status": "error", "message": "JSON inválido"}
     name = body.get("name", "")
+    # ── Modo Supabase ──
+    supa_db = _get_supabase_db()
+    if supa_db:
+        try:
+            result = supa_db._client.table("feed_configs").select("enabled").eq("name", name).execute()
+            if not result.data: return {"status": "error", "message": f"Feed '{name}' no encontrado"}
+            new_state = not result.data[0].get("enabled", True)
+            supa_db._client.table("feed_configs").update({"enabled": new_state}).eq("name", name).execute()
+            return {"status": "ok", "enabled": new_state}
+        except Exception as e: return {"status": "error", "message": str(e)}
+    # ── Modo local ──
     try:
         ns = ingester.toggle_feed(name)
         if ns is None: return {"status": "error", "message": f"Feed '{name}' no encontrado"}
@@ -971,7 +1082,7 @@ def _run_orchestrated_pipeline_background() -> None:
         # Guardar entidades en DB si hay
         if entities:
             try:
-                n = db.insert_entities(entities, "orchestrated-pipeline")
+                n = _get_db().insert_entities(entities, "orchestrated-pipeline")
                 orch_dict["entities_saved"] = n
             except Exception as exc:
                 orch_dict["entities_save_error"] = str(exc)
@@ -986,7 +1097,7 @@ def _run_orchestrated_pipeline_background() -> None:
                     "source_files": [inp.get("id", "") for inp in inputs[:5]],
                     "output_filename": "orchestrated_synthesis.json",
                 }
-                db.insert_synthesis(synth_data)
+                _get_db().insert_synthesis(synth_data)
                 orch_dict["synthesis_saved"] = True
             except Exception as exc:
                 orch_dict["synthesis_save_error"] = str(exc)
@@ -1003,7 +1114,7 @@ def _run_orchestrated_pipeline_background() -> None:
                         "deadline": "",
                         "priority": "ALTA" if i < 2 else "MEDIA",
                     })
-                db.insert_action_items(items, "orchestrated-pipeline")
+                _get_db().insert_action_items(items, "orchestrated-pipeline")
                 orch_dict["actions_saved"] = len(items)
             except Exception as exc:
                 orch_dict["actions_save_error"] = str(exc)
@@ -1205,7 +1316,7 @@ async def api_hybrid_run(request: Request):
 
             if entities:
                 try:
-                    db.insert_entities(entities, "hybrid-orchestrator")
+                    _get_db().insert_entities(entities, "hybrid-orchestrator")
                     result["entities_saved"] = len(entities)
                 except Exception as exc:
                     result["entities_save_error"] = str(exc)
@@ -1220,7 +1331,7 @@ async def api_hybrid_run(request: Request):
                         "source_files": [e.get("id", "") for e in evidence[:5]],
                         "output_filename": "hybrid_orchestrated_synthesis.json",
                     }
-                    db.insert_synthesis(synth_data)
+                    _get_db().insert_synthesis(synth_data)
                     result["synthesis_saved"] = True
                 except Exception as exc:
                     result["synthesis_save_error"] = str(exc)
@@ -1237,7 +1348,7 @@ async def api_hybrid_run(request: Request):
                             "deadline": "",
                             "priority": "ALTA" if i < 2 else "MEDIA",
                         })
-                    db.insert_action_items(items, "hybrid-orchestrator")
+                    _get_db().insert_action_items(items, "hybrid-orchestrator")
                     result["actions_saved"] = len(items)
                 except Exception as exc:
                     result["actions_save_error"] = str(exc)
@@ -1399,14 +1510,14 @@ def _build_chat_context(user_message: str) -> str:
             # Construir query inteligente usando entidades del sistema
             entity_names = []
             try:
-                top_entities = db.list_entities(limit=5)
+                top_entities = _get_db().list_entities(limit=5)
                 entity_names = [e.get("name", "") for e in top_entities if e.get("name")]
             except Exception:
                 pass
 
             categories = []
             try:
-                classifications = db.list_classifications(limit=2)
+                classifications = _get_db().list_classifications(limit=2)
                 categories = [c.get("primary_category", "") for c in classifications if c.get("primary_category")]
             except Exception:
                 pass
@@ -1474,7 +1585,7 @@ def _build_chat_context(user_message: str) -> str:
     # ── Síntesis recientes ──
     if wants_news or wants_all:
         try:
-            syntheses = db.list_syntheses(limit=3)
+            syntheses = _get_db().list_syntheses(limit=3)
             if syntheses:
                 synth_lines = []
                 for s in syntheses:
@@ -1499,7 +1610,7 @@ def _build_chat_context(user_message: str) -> str:
     # ── Entidades recientes ──
     if wants_entities or wants_all:
         try:
-            entities = db.list_entities(limit=15)
+            entities = _get_db().list_entities(limit=15)
             if entities:
                 ent_lines = []
                 for e in entities:
@@ -1514,7 +1625,7 @@ def _build_chat_context(user_message: str) -> str:
     # ── Clasificaciones recientes ──
     if wants_all:
         try:
-            classifications = db.list_classifications(limit=5)
+            classifications = _get_db().list_classifications(limit=5)
             if classifications:
                 class_lines = []
                 for c in classifications:
@@ -1534,7 +1645,7 @@ def _build_chat_context(user_message: str) -> str:
     # ── Action items ──
     if wants_actions or wants_all:
         try:
-            actions = db.list_action_items(limit=10)
+            actions = _get_db().list_action_items(limit=10)
             if actions:
                 act_lines = []
                 for a in actions:
